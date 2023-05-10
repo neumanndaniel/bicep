@@ -21,6 +21,7 @@ The Azure Kubernetes Service cluster and node pool configuration:
 - kubernetes_version: The Kubernetes version of the cluster. (1.23.8)
 - sla_sku: The SLA SKU tier. (Free|Paid)
 - upgrade_channel: The upgrade channel of the cluster. (node-image|none|patch|rapid|stable)
+- node_os_upgrade_channel: The upgrade channel of the node image. ('NodeImage'|'None'|'SecurityPatch'|'Unmanaged')
 - default_node_pool: The default node pool configuration.
   - availability_zones: Availability zones of the node pool. ([ '1', '2', '3' ])
   - count: Number of nodes in the node pool. (3)
@@ -55,6 +56,7 @@ param cluster_configuration object = {
   kubernetes_version: ''
   sla_sku: 'Free'
   upgrade_channel: 'stable'
+  node_os_upgrade_channel: 'SecurityPatch'
   default_node_pool: {
     availability_zones: [ '1', '2', '3' ]
     count: 3
@@ -144,24 +146,29 @@ The Azure Kubernetes Service cluster network configuration:
 - vnet_rg: The resource group of the virtual network.
 - vnet_name: The name of the virtual network.
 - subnet_name: The name of the subnet.
+- network_dataplane: The network dataplane to use. (azure|cilium)
 - network_plugin: The network plugin to use. (azure|none)
-- network_policy: The network policy plguin to use. (azure|calico)
+- network_overlay: Enable Azure CNI Overlay (true|false)
+- network_policy: The network policy plguin to use. (azure|calico|cilium)
 - network_dns_service_ip: The IP address of the Kubernetes DNS service within the Kubernetes service network.
 - network_service_cidr: The IP range in CIDR notation of the Kubernetes service network.
+- network_pod_cidr: The IP range in CIDR notation of the Kubernetes pod overlay network.
 ''')
 param network_configuration object = {
   vnet_rg: ''
   vnet_name: ''
   subnet_name: ''
+  network_dataplane: 'azure | cilium'
   network_plugin: 'azure | none'
-  network_policy: 'azure | calico'
+  network_policy: 'azure | calico | cilium'
   network_dns_service_ip: ''
   network_service_cidr: ''
+  network_pod_cidr: ''
 }
 
 // Variables
-var cluster_name = (!use_name) ? 'aks-${name}' : name
-var node_rg_name = (!use_name) ? '${cluster_name}-nodes' : '${cluster_name}-worker'
+var cluster_name = use_name ? name : 'aks-${name}'
+var node_rg_name = use_name ? '${cluster_name}-nodes' : 'rg-${cluster_name}-nodes'
 var default_node_pool = cluster_configuration.default_node_pool
 var all_node_pools = union(array(cluster_configuration.default_node_pool), cluster_configuration.additional_node_pools)
 
@@ -207,12 +214,12 @@ module data_azure_kubernetes_service_default_node_pool '../data_azure_kubernetes
 }
 
 // Resources
-resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@2022-07-01' = {
+resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@2023-02-02-preview' = {
   name: cluster_name
   location: location
   tags: tags
   sku: {
-    name: 'Basic'
+    name: 'Base'
     tier: cluster_configuration.sla_sku
   }
   identity: {
@@ -271,6 +278,7 @@ resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@20
     }
     autoUpgradeProfile: {
       upgradeChannel: cluster_configuration.upgrade_channel
+      nodeOSUpgradeChannel: cluster_configuration.node_os_upgrade_channel
     }
     disableLocalAccounts: true
     dnsPrefix: cluster_name
@@ -285,11 +293,17 @@ resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@20
           count: 1
         }
       }
+      networkDataplane: toLower(network_configuration.network_plugin) != 'none' ? network_configuration.network_dataplane : null
       networkPlugin: network_configuration.network_plugin
+      networkPluginMode: toLower(network_configuration.network_plugin) != 'none' && network_configuration.network_overlay ? 'Overlay' : null
       networkPolicy: toLower(network_configuration.network_plugin) != 'none' ? network_configuration.network_policy : null
-      dnsServiceIP: network_configuration.network_dns_service_ip
-      dockerBridgeCidr: '172.17.0.1/16'
-      serviceCidr: network_configuration.network_service_cidr
+      dnsServiceIP: toLower(network_configuration.network_plugin) != 'none' ? network_configuration.network_dns_service_ip : null
+      podCidr: toLower(network_configuration.network_plugin) != 'none' && network_configuration.network_overlay ? network_configuration.network_pod_cidr : null
+      serviceCidr: toLower(network_configuration.network_plugin) != 'none' ? network_configuration.network_service_cidr : null
+      kubeProxyConfig: {
+        enabled: toLower(network_configuration.network_plugin) != 'none' ? true : false
+        mode: 'IPVS'
+      }
     }
     nodeResourceGroup: node_rg_name
     publicNetworkAccess: 'Enabled'
@@ -302,6 +316,9 @@ resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@20
       }
     }
     storageProfile: {
+      blobCSIDriver: {
+        enabled: true
+      }
       diskCSIDriver: {
         enabled: true
       }
@@ -315,7 +332,7 @@ resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@20
   }
 }
 
-resource azure_kubernetes_service_node_pools 'Microsoft.ContainerService/managedClusters/agentPools@2022-06-02-preview' = [for node_pool in all_node_pools: {
+resource azure_kubernetes_service_node_pools 'Microsoft.ContainerService/managedClusters/agentPools@2023-02-02-preview' = [for node_pool in all_node_pools: {
   name: length(node_pool.name) <= 12 ? node_pool.name : substring(node_pool.name, 0, 12)
   parent: azure_kubernetes_service
   properties: {
@@ -385,3 +402,10 @@ module rbac_subscription_azure_container_registry '../rbac_subscription_containe
     object_id: azure_kubernetes_service.properties.identityProfile.kubeletidentity.objectId
   }
 }
+
+output aks_id string = azure_kubernetes_service.id
+output aks_name string = azure_kubernetes_service.name
+output aks_acr_role_assignment_id string = acr_configuration.use_acr && !acr_configuration.different_subscription ? rbac_azure_container_registry.outputs.acr_role_assignment_id : acr_configuration.use_acr && acr_configuration.different_subscription ? rbac_subscription_azure_container_registry.outputs.acr_role_assignment_id : null
+output aks_acr_role_assignment_api_version string = acr_configuration.use_acr && !acr_configuration.different_subscription ? rbac_azure_container_registry.outputs.acr_role_assignment_api_version : acr_configuration.use_acr && acr_configuration.different_subscription ? rbac_subscription_azure_container_registry.outputs.acr_role_assignment_api_version : null
+output aks_snet_role_assignment_id string = rbac_vnet_subnet.outputs.snet_role_assignment_id
+output aks_snet_role_assignment_api_version string = rbac_vnet_subnet.outputs.snet_role_assignment_api_version

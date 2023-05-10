@@ -2,10 +2,10 @@
 @description('The name of the virtual network and subnet.')
 param name string = ''
 
-@description('The azure region of the virtual network.')
+@description('The Azure region of the virtual network.')
 param location string = resourceGroup().location
 
-@description('Key:Value tags of the resource group.')
+@description('Key:Value tags of the virtual network.')
 param tags object = {}
 
 @description('The address prefixes in CIDR notation of the virtual network.')
@@ -25,8 +25,8 @@ Control the naming prefix:
 param use_name bool = false
 
 // Variables
-var vnet_name = (!use_name) ? 'vnet-${name}' : name
-var snet_name = (!use_name) ? 'snet-${name}' : name
+var vnet_name = use_name ? name : 'vnet-${name}'
+var snet_name = use_name ? name : 'snet-${name}'
 
 // Resources
 resource virtual_network 'Microsoft.Network/virtualNetworks@2022-01-01' = {

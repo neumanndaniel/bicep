@@ -31,3 +31,6 @@ module rbac_azure_container_registry '../rbac_container_registry/main.bicep' = {
     object_id: object_id
   }
 }
+
+output acr_role_assignment_id string = rbac_azure_container_registry.outputs.acr_role_assignment_id
+output acr_role_assignment_api_version string = rbac_azure_container_registry.outputs.acr_role_assignment_api_version

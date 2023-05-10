@@ -27,3 +27,6 @@ resource acr_rbac_assignment 'Microsoft.Authorization/roleAssignments@2022-04-01
     roleDefinitionId: acr_pull.id
   }
 }
+
+output acr_role_assignment_id string = acr_rbac_assignment.id
+output acr_role_assignment_api_version string = acr_rbac_assignment.apiVersion

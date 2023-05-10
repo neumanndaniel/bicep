@@ -4,7 +4,7 @@ targetScope = 'subscription'
 @description('The name of the resource group.')
 param name string = ''
 
-@description('The azure region of the resource group.')
+@description('The Azure region of the resource group.')
 param location string = ''
 
 @description('Key:Value tags of the resource group.')
@@ -18,7 +18,7 @@ Control naming prefix:
 param use_name bool = false
 
 // Variables
-var rg_name = (!use_name) ? 'rg-${name}' : name
+var rg_name = use_name ? name : 'rg-${name}'
 
 // Resources
 resource resource_group 'Microsoft.Resources/resourceGroups@2021-04-01' = {

@@ -35,3 +35,6 @@ resource subnet_rbac_assignment 'Microsoft.Authorization/roleAssignments@2022-04
     roleDefinitionId: network_contributor.id
   }
 }
+
+output snet_role_assignment_id string = subnet_rbac_assignment.id
+output snet_role_assignment_api_version string = subnet_rbac_assignment.apiVersion
