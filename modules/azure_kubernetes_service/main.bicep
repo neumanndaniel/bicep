@@ -48,6 +48,7 @@ The Azure Kubernetes Service cluster and node pool configuration:
   - node_labels: Kubernetes node labels.
   - node_taints: Kubernetes node taints
   - os_disk_size: The size of the OS disk in GB. (128)
+  - os_sku: The OS SKU of the node pool. (AzureLinux|Ubuntu)
   - vm_size: The size of the virtual machine. (Standard_D2s_v3)
   - workload_runtime: The workload runtime of the node pool. (OCIContainer|WasmWasi)
   - max_surge: The maximum node surge during an upgrade. (2|25%)
@@ -68,6 +69,7 @@ param cluster_configuration object = {
     node_labels: {}
     node_taints: []
     os_disk_size: 100
+    os_sku: 'AzureLinux'
     vm_size: 'Standard_D4s_v3'
     workload_runtime: 'OCIContainer'
     max_surge: '2'
@@ -85,6 +87,7 @@ param cluster_configuration object = {
       node_labels: {}
       node_taints: []
       os_disk_size: 100
+      os_sku: 'AzureLinux'
       vm_size: 'Standard_D4s_v3'
       workload_runtime: 'OCIContainer'
       max_surge: 2
@@ -153,6 +156,7 @@ The Azure Kubernetes Service cluster network configuration:
 - network_dns_service_ip: The IP address of the Kubernetes DNS service within the Kubernetes service network.
 - network_service_cidr: The IP range in CIDR notation of the Kubernetes service network.
 - network_pod_cidr: The IP range in CIDR notation of the Kubernetes pod overlay network.
+- kube_proxy_mode: The kube-proxy mode. (IPTABLES|IPVS)
 ''')
 param network_configuration object = {
   vnet_rg: ''
@@ -164,6 +168,7 @@ param network_configuration object = {
   network_dns_service_ip: ''
   network_service_cidr: ''
   network_pod_cidr: ''
+  kube_proxy_mode: 'IPTABLES | IPVS'
 }
 
 // Variables
@@ -214,7 +219,7 @@ module data_azure_kubernetes_service_default_node_pool '../data_azure_kubernetes
 }
 
 // Resources
-resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@2023-02-02-preview' = {
+resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@2023-03-02-preview' = {
   name: cluster_name
   location: location
   tags: tags
@@ -262,7 +267,7 @@ resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@20
         orchestratorVersion: cluster_configuration.kubernetes_version
         osDiskSizeGB: default_node_pool.os_disk_size
         osDiskType: 'Ephemeral'
-        osSKU: 'Ubuntu'
+        osSKU: default_node_pool.os_sku
         osType: 'Linux'
         type: 'VirtualMachineScaleSets'
         upgradeSettings: {
@@ -302,7 +307,7 @@ resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@20
       serviceCidr: toLower(network_configuration.network_plugin) != 'none' ? network_configuration.network_service_cidr : null
       kubeProxyConfig: {
         enabled: toLower(network_configuration.network_plugin) != 'none' ? true : false
-        mode: 'IPVS'
+        mode: network_configuration.kube_proxy_mode
       }
     }
     nodeResourceGroup: node_rg_name
@@ -332,7 +337,7 @@ resource azure_kubernetes_service 'Microsoft.ContainerService/managedClusters@20
   }
 }
 
-resource azure_kubernetes_service_node_pools 'Microsoft.ContainerService/managedClusters/agentPools@2023-02-02-preview' = [for node_pool in all_node_pools: {
+resource azure_kubernetes_service_node_pools 'Microsoft.ContainerService/managedClusters/agentPools@2023-03-02-preview' = [for node_pool in all_node_pools: {
   name: length(node_pool.name) <= 12 ? node_pool.name : substring(node_pool.name, 0, 12)
   parent: azure_kubernetes_service
   properties: {
@@ -349,7 +354,7 @@ resource azure_kubernetes_service_node_pools 'Microsoft.ContainerService/managed
     orchestratorVersion: cluster_configuration.kubernetes_version
     osDiskSizeGB: node_pool.os_disk_size
     osDiskType: 'Ephemeral'
-    osSKU: 'Ubuntu'
+    osSKU: node_pool.os_sku
     osType: 'Linux'
     type: 'VirtualMachineScaleSets'
     upgradeSettings: {
